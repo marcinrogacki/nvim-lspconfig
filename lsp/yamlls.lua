@@ -38,6 +38,10 @@
 --- })
 --- ```
 ---
+--- `yaml.schemas` from `.vscode/settings.json` at the project root is merged into `settings.yaml.schemas`
+--- before startup. `//` and `/* */` comments in that file are ignored. A `before_init` in your own
+--- config replaces this.
+---
 --- Currently, kubernetes is special-cased in yammls, see the following upstream issues:
 --- * [#211](https://github.com/redhat-developer/yaml-language-server/issues/211).
 --- * [#307](https://github.com/redhat-developer/yaml-language-server/issues/307).
@@ -59,9 +63,88 @@
 --- })
 --- ```
 
+-- Retrieve settings.json content
+---@param absolute_path string
+---@return table
+local function read_settings_content(absolute_path)
+  local f = io.open(absolute_path, 'r')
+  if not f then
+    vim.notify(string.format('yamlls: missing settings file %s', absolute_path), vim.log.levels.WARN)
+    return {}
+  end
+  local content = f:read('*a')
+  f:close()
+  local ok, settings = pcall(vim.json.decode, content, { skip_comments = true })
+  if not ok then
+    vim.notify(string.format('yamlls: failed to parse file %s', absolute_path), vim.log.levels.WARN)
+    return {}
+  end
+  if type(settings) ~= 'table' then
+    vim.notify(string.format('yamlls: file is not decoded into lua table %s', absolute_path), vim.log.levels.WARN)
+    return {}
+  end
+  return settings
+end
+
+-- Converts settings dotted keys into tables e.g. { ["yaml.format.enable"] = false } => { yaml = { format = { enable = false } } }.
+-- Only `yaml.*` properties are kept. Does not support nested keys like { yaml = { "format.enable" = false } }.
+---@param settings table<string, any> decoded settings file
+---@return table lsp settings to merge
+local function expand_settings_keys(settings)
+  local result = {}
+  local roots = { 'yaml', 'redhat' }
+  for key, item in pairs(settings) do
+    for _, name in ipairs(roots) do
+      -- dotted keys are strings and must start with 'yaml.' or 'redhat.'
+      if type(key) ~= 'string' or not vim.startswith(key, name .. '.') then
+        continue
+      end
+      local parts = vim.split(key, '.', { plain = true })
+      local node = result
+      for i = 1, #parts - 1 do
+        local part = parts[i]
+        if type(node[part]) ~= 'table' then
+          node[part] = {}
+        end
+        node = node[part]
+      end
+      node[parts[#parts]] = item
+      break
+    end
+  end
+  return result
+end
+
+-- Uncomment to test manually expand_settings_keys() via `nvim --clean --headless -l lsp/yamlls.lua`
+-- local input = {
+--   ["redhat.telemetry.enabled"] = false,
+--   ["yaml.format.enable"] = false,
+--   ["yaml.schemas"] = {
+--     ["https://json.schemastore.org/github-workflow.json"] = "/.github/workflows/*",
+--     ["../path/relative/to/file.yml"] = { "/.yaml/*", "/.other/yaml/*" }
+--   },
+--   ["ignore.this.yaml"] = "bar"
+-- }
+-- local expected = {
+--   redhat = { telemetry = { enabled = false } },
+--   yaml = {
+--     format = { enable = false },
+--     schemas = {
+--       ["https://json.schemastore.org/github-workflow.json"] = "/.github/workflows/*",
+--       ["../path/relative/to/file.yml"] = {
+--         "/.yaml/*",
+--         "/.other/yaml/*"
+--       }
+--     }
+--   }
+-- }
+-- local got = expand_settings_keys(input)
+-- assert(vim.deep_equal(expected, got), string.format('expected: %s\ngot: %s', vim.inspect(expected), vim.inspect(got)))
+
+---@diagnostic disable-next-line: type-not-found
 ---@type vim.lsp.Config
 return {
-  cmd = function(dispatchers, config)
+  cmd = function (dispatchers, config)
     local cmd = 'yaml-language-server'
     if (config or {}).root_dir then
       local local_cmd = vim.fs.joinpath(config.root_dir, 'node_modules/.bin', cmd)
@@ -73,18 +156,44 @@ return {
   end,
   filetypes = { 'yaml', 'yaml.docker-compose', 'yaml.gitlab', 'yaml.helm-values' },
   root_markers = { '.git' },
+  ---@diagnostic disable-next-line: type-not-found
   ---@type lspconfig.settings.yamlls
   settings = {
     -- https://github.com/redhat-developer/vscode-redhat-telemetry#how-to-disable-telemetry-reporting
     redhat = { telemetry = { enabled = false } },
     -- formatting disabled by default in yaml-language-server; enable it
-    yaml = { format = { enable = true } },
+    yaml = { format = { enable = true } }
   },
-  on_init = function(client)
+  -- Merge yaml settings from .vscode/settings.json. Compatible with VS Code extension:
+  -- https://github.com/redhat-developer/vscode-yaml/tree/ee915c0ff5164d1cf84d6369bf2f4934d52eafd4#extension-settings
+  before_init = function (_, config)
+    if not config.root_dir or config.root_dir == '' then
+      return
+    end
+    -- Load file settings
+    local settings_relative_path = '.vscode/settings.json'
+    local settings_absolute_path = vim.fs.joinpath(config.root_dir, settings_relative_path)
+    local file_content = read_settings_content(settings_absolute_path)
+    local file_settings = expand_settings_keys(file_content)
+    -- Merge with default and user settings
+    local settings = config.settings or {}
+    local root_markers = { 'yaml', 'redhat' }
+    for _, name in ipairs(root_markers) do
+      local current = settings[name]
+      -- Satisfy type checks. Also in case user make mistake with vim.lsp.config('yamlls')
+      if type(current) == 'table' then
+        -- Need to merge key by key since settings was already referenced by lsp
+        settings[name] = vim.tbl_deep_extend('force', current, file_settings[name] or {})
+      else
+        vim.notify(('yamlls: settings.%s is not a table'):format(name), vim.log.levels.WARN)
+      end
+    end
+  end,
+  on_init = function (client)
     --- https://github.com/neovim/nvim-lspconfig/pull/4016
     --- Since formatting is disabled by default if you check `client:supports_method('textDocument/formatting')`
     --- during `LspAttach` it will return `false`. This hack sets the capability to `true` to facilitate
     --- autocmd's which check this capability
     client.server_capabilities.documentFormattingProvider = true
-  end,
+  end
 }
