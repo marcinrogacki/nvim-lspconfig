@@ -7,7 +7,7 @@
 --- yarn global add yaml-language-server
 --- ```
 ---
---- To use a schema for validation, there are two options:
+--- To use a schema for validation, there are three options:
 ---
 --- 1. Add a modeline to the file. A modeline is a comment of the form:
 ---
@@ -38,10 +38,6 @@
 --- })
 --- ```
 ---
---- `yaml.schemas` from `.vscode/settings.json` at the project root is merged into `settings.yaml.schemas`
---- before startup. `//` and `/* */` comments in that file are ignored. A `before_init` in your own
---- config replaces this.
----
 --- Currently, kubernetes is special-cased in yammls, see the following upstream issues:
 --- * [#211](https://github.com/redhat-developer/yaml-language-server/issues/211).
 --- * [#307](https://github.com/redhat-developer/yaml-language-server/issues/307).
@@ -60,6 +56,29 @@
 ---       },
 ---     },
 ---   }
+--- })
+--- ```
+---
+--- 3. Define in .vscode/settings.json. Properties `yaml.*` and `redhat.*` are merged into `settings` before startup.
+--- Comments `//` and `/* */` in that file are ignored. Supported settings:
+--- https://github.com/redhat-developer/vscode-yaml/tree/ee915c0ff5164d1cf84d6369bf2f4934d52eafd4#extension-settings
+--
+--- ```json
+--- {
+---   "redhat.telemetry.enabled": false
+---   "yaml.format.enable": false,
+---   "yaml.schemas": {
+---     "https://json.schemastore.org/github-workflow.json": "/.github/workflows/*",
+---     "../path/relative/to/file.yml": "/.github/workflows/*",
+---     "/path/from/root/of/project": "/.github/workflows/*"
+---   },
+--- }
+--- ```
+---
+--- Change localization of the settings.json. Set `settings_files` to `nil` to skip.
+--- ```lua
+--- vim.lsp.config('yamlls', {
+---   settings_files = { 'mysettings.jsonc' },
 --- })
 --- ```
 
@@ -141,8 +160,14 @@ end
 -- local got = expand_settings_keys(input)
 -- assert(vim.deep_equal(expected, got), string.format('expected: %s\ngot: %s', vim.inspect(expected), vim.inspect(got)))
 
----@diagnostic disable-next-line: type-not-found
----@type vim.lsp.Config
+---@class YamllsSettingsFiles
+---@field settings_files? string[] List of settings.json files relative to root_dir. Defaults to { '.vscode/settings.json' }
+
+---@class YamllsVimLspConfig: vim.lsp.Config, YamllsSettingsFiles
+
+---@class YamllsVimLspClientConfig: vim.lsp.ClientConfig, YamllsSettingsFiles
+
+---@type YamllsVimLspConfig
 return {
   cmd = function (dispatchers, config)
     local cmd = 'yaml-language-server'
@@ -156,36 +181,45 @@ return {
   end,
   filetypes = { 'yaml', 'yaml.docker-compose', 'yaml.gitlab', 'yaml.helm-values' },
   root_markers = { '.git' },
-  ---@diagnostic disable-next-line: type-not-found
-  ---@type lspconfig.settings.yamlls
   settings = {
     -- https://github.com/redhat-developer/vscode-redhat-telemetry#how-to-disable-telemetry-reporting
     redhat = { telemetry = { enabled = false } },
     -- formatting disabled by default in yaml-language-server; enable it
     yaml = { format = { enable = true } }
   },
-  -- Merge yaml settings from .vscode/settings.json. Compatible with VS Code extension:
+  settings_files = { '.vscode/settings.json' },
+  -- Merge yaml settings from settings_file. Settings files must be compatible with VS Code extension:
   -- https://github.com/redhat-developer/vscode-yaml/tree/ee915c0ff5164d1cf84d6369bf2f4934d52eafd4#extension-settings
+  ---@param config YamllsVimLspClientConfig
   before_init = function (_, config)
     if not config.root_dir or config.root_dir == '' then
       return
     end
-    -- Load file settings
-    local settings_relative_path = '.vscode/settings.json'
-    local settings_absolute_path = vim.fs.joinpath(config.root_dir, settings_relative_path)
-    local file_content = read_settings_content(settings_absolute_path)
-    local file_settings = expand_settings_keys(file_content)
-    -- Merge with default and user settings
-    local settings = config.settings or {}
-    local root_markers = { 'yaml', 'redhat' }
-    for _, name in ipairs(root_markers) do
-      local current = settings[name]
-      -- Satisfy type checks. Also in case user make mistake with vim.lsp.config('yamlls')
-      if type(current) == 'table' then
-        -- Need to merge key by key since settings was already referenced by lsp
-        settings[name] = vim.tbl_deep_extend('force', current, file_settings[name] or {})
-      else
-        vim.notify(('yamlls: settings.%s is not a table'):format(name), vim.log.levels.WARN)
+    if not config.settings_files then
+      return
+    end
+    -- Process all available settings files
+    for _, rel_path in ipairs(config.settings_files) do
+      if type(rel_path) ~= 'string' or settings_file == '' then
+        vim.notify(string.format('yamlls: settings_files has invalid entry: %s', rel_path), vim.log.levels.WARN)
+        break
+      end
+      -- Load file settings
+      local absolute_path = vim.fs.joinpath(config.root_dir, rel_path)
+      local file_content = read_settings_content(absolute_path)
+      local file_settings = expand_settings_keys(file_content)
+      -- Merge with default and user settings
+      local settings = config.settings or {}
+      local root_markers = { 'yaml', 'redhat' }
+      for _, name in ipairs(root_markers) do
+        local current = settings[name]
+        -- Satisfy type checks. Also in case user make mistake with vim.lsp.config('yamlls')
+        if type(current) == 'table' then
+          -- Need to merge key by key since settings was already referenced by lsp
+          settings[name] = vim.tbl_deep_extend('force', current, file_settings[name] or {})
+        else
+          vim.notify(('yamlls: settings.%s is not a table'):format(name), vim.log.levels.WARN)
+        end
       end
     end
   end,
