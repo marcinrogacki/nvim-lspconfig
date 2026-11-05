@@ -2750,11 +2750,11 @@ Default config:
   {
     editorInfo = {
       name = "Neovim",
-      version = "0.13.0"
+      version = "0.12.6"
     },
     editorPluginInfo = {
       name = "Neovim",
-      version = "0.13.0"
+      version = "0.12.6"
     }
   }
   ```
@@ -5452,8 +5452,8 @@ Default config:
 - `init_options` :
   ```lua
   {
-    cache_path = "/home/runner/.cache/gitlab-ci-ls/",
-    log_path = "/home/runner/.cache/gitlab-ci-ls//log/gitlab-ci-ls.log"
+    cache_path = ".//.cache/gitlab-ci-ls/",
+    log_path = ".//.cache/gitlab-ci-ls//log/gitlab-ci-ls.log"
   }
   ```
 - `root_dir`: [../lsp/gitlab_ci_ls.lua:15](../lsp/gitlab_ci_ls.lua#L15)
@@ -5528,20 +5528,20 @@ Default config:
   {
     editorInfo = {
       name = "Neovim",
-      version = "0.13.0"
+      version = "0.12.6"
     },
     editorPluginInfo = {
       name = "Neovim LSP",
-      version = "0.13.0"
+      version = "0.12.6"
     },
     extension = {
       name = "Neovim LSP Client",
-      version = "0.13.0"
+      version = "0.12.6"
     },
     ide = {
       name = "Neovim",
       vendor = "Neovim",
-      version = "0.13.0"
+      version = "0.12.6"
     }
   }
   ```
@@ -10829,7 +10829,7 @@ Default config:
 - `cmd_env` :
   ```lua
   {
-    ERG_PATH = "/home/runner/.erg"
+    ERG_PATH = "./.erg"
   }
   ```
 - `filetypes` :
@@ -12637,7 +12637,7 @@ Default config:
     activateSnykIac = "true",
     activateSnykOpenSource = "true",
     integrationName = "Neovim",
-    integrationVersion = "0.13.0",
+    integrationVersion = "0.12.6",
     token = vim.NIL,
     trustedFolders = {}
   }
@@ -14808,7 +14808,7 @@ Default config:
       jsx = "javascript",
       php_only = "php"
     },
-    parser_install_directories = { "/home/runner/.local/share/nvim/site/parser" }
+    parser_install_directories = { "/home/robak/workspace/nvim-lspconfig/.local/share/nvim/site/parser" }
   }
   ```
 - `on_attach`: [../lsp/ts_query_ls.lua:26](../lsp/ts_query_ls.lua#L26)
@@ -16369,7 +16369,7 @@ https://github.com/redhat-developer/yaml-language-server
 yarn global add yaml-language-server
 ```
 
-To use a schema for validation, there are two options:
+To use a schema for validation, there are three options:
 
 1. Add a modeline to the file. A modeline is a comment of the form:
 
@@ -16421,18 +16421,42 @@ vim.lsp.config('yamlls', {
 })
 ```
 
+3. Define in .vscode/settings.json. Properties `yaml.*` and `redhat.*` are merged into `settings` before startup.
+Comments `//` and `/* */` in that file are ignored. Supported settings:
+https://github.com/redhat-developer/vscode-yaml/tree/ee915c0ff5164d1cf84d6369bf2f4934d52eafd4#extension-settings
+
+```json
+{
+  "redhat.telemetry.enabled": false
+  "yaml.format.enable": false,
+  "yaml.schemas": {
+    "https://json.schemastore.org/github-workflow.json": "/.github/workflows/*",
+    "../path/relative/to/file.yml": "/.github/workflows/*",
+    "/path/from/root/of/project": "/.github/workflows/*"
+  },
+}
+```
+
+Change localization of the settings.json. Set `settings_files` to `nil` to skip.
+```lua
+vim.lsp.config('yamlls', {
+  settings_files = { 'mysettings.jsonc' },
+})
+```
+
 Snippet to enable the language server:
 ```lua
 vim.lsp.enable('yamlls')
 ```
 
 Default config:
-- `cmd`: [../lsp/yamlls.lua:63](../lsp/yamlls.lua#L63)
+- `before_init`: [../lsp/yamlls.lua:171](../lsp/yamlls.lua#L171)
+- `cmd`: [../lsp/yamlls.lua:171](../lsp/yamlls.lua#L171)
 - `filetypes` :
   ```lua
   { "yaml", "yaml.docker-compose", "yaml.gitlab", "yaml.helm-values" }
   ```
-- `on_init`: [../lsp/yamlls.lua:63](../lsp/yamlls.lua#L63)
+- `on_init`: [../lsp/yamlls.lua:171](../lsp/yamlls.lua#L171)
 - `root_markers` :
   ```lua
   { ".git" }
@@ -16451,6 +16475,10 @@ Default config:
       }
     }
   }
+  ```
+- `settings_files` :
+  ```lua
+  { ".vscode/settings.json" }
   ```
 
 ---
